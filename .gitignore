@@ -1,0 +1,5 @@
+# 我的api-key
+.env
+
+# 会话步骤 txt 记录（按时间生成，不必入库）
+logger/records/*.txt
