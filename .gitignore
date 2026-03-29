@@ -3,3 +3,9 @@
 
 # 会话步骤 txt 记录（按时间生成，不必入库）
 logger/records/*.txt
+logger/records/*.md
+
+.idea/
+
+__pycache__/
+*.py[cod]
