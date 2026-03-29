@@ -28,16 +28,26 @@ def main() -> None:
         action="store_true",
         help="不写 logger/records 下的步骤 txt（默认写入）",
     )
+    p.add_argument(
+        "--no-fetch-page",
+        action="store_true",
+        help="搜索后不再拉取网页正文/OCR，仅用引擎摘要（更快）",
+    )
     p.add_argument("-v", "--verbose", action="store_true", help="调试日志")
     args = p.parse_args()
     _configure_logging(args.verbose)
 
     try:
         fl = not args.no_file_log
+        fetch_page = not args.no_fetch_page
         if args.task.strip():
-            text = run_deep_research(args.task.strip(), file_log=fl)
+            text = run_deep_research(
+                args.task.strip(),
+                file_log=fl,
+                fetch_full_page=fetch_page,
+            )
         else:
-            text = run_deep_research_demo(file_log=fl)
+            text = run_deep_research_demo(file_log=fl, fetch_full_page=fetch_page)
         print()
         print("=" * 60)
         print(text)

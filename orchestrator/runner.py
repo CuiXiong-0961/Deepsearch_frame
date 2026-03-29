@@ -16,6 +16,7 @@ from reflection.reflector import Reflector
 from retrievers.web import WebRetriever
 from schemas.models import Document, Plan, SubTask
 from synthesizer.synthesizer import Synthesizer
+from tools.page_reader import PageEnrichConfig
 from tools.web_search import web_search
 
 logger = logging.getLogger(__name__)
@@ -73,12 +74,16 @@ def run_deep_research(
     web_retriever: WebRetriever | None = None,
     step_logger: SessionStepLogger | None = None,
     file_log: bool = True,
+    fetch_full_page: bool = True,
+    page_cfg: PageEnrichConfig | None = None,
 ) -> str:
     """
     执行完整深度检索研究，返回最终报告 Markdown 正文。
 
     file_log 为 True 时，在 ``logger/records/`` 下创建按时间命名的 txt，
     记录各步骤输入输出；也可传入已构造的 ``step_logger``。
+
+    fetch_full_page 为 True 时，在搜索后对每条 URL 拉正文并尝试图片 OCR（见 ``tools.page_reader``）。
     """
     from utils.my_llm import QwenModel, LLMVendor, get_llm
 
@@ -129,7 +134,13 @@ def run_deep_research(
                 global_searches += 1
                 searches_this += 1
                 round_idx += 1
-                new_docs, audit = web_search(query, max_results=5, retriever=web_retriever)
+                new_docs, audit = web_search(
+                    query,
+                    max_results=5,
+                    retriever=web_retriever,
+                    fetch_full_page=fetch_full_page,
+                    page_cfg=page_cfg,
+                )
                 logger.info("search audit: %s", audit)
                 all_docs = _dedupe_docs(all_docs + new_docs)
                 if step_logger:
@@ -214,7 +225,7 @@ def run_deep_research(
             step_logger.close()
 
 
-def run_deep_research_demo(*, file_log: bool = True) -> str:
+def run_deep_research_demo(*, file_log: bool = True, fetch_full_page: bool = True) -> str:
     """默认演示问题（偏科普，便于联网检索）。"""
     q = "2024–2025 年主流大语言模型在中文场景下有哪些代表性进展？请分技术路线简述。"
-    return run_deep_research(q, file_log=file_log)
+    return run_deep_research(q, file_log=file_log, fetch_full_page=fetch_full_page)
