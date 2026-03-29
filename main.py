@@ -22,7 +22,7 @@ def _configure_logging(verbose: bool) -> None:
 
 def main() -> None:
     p = argparse.ArgumentParser(description="Deep Research 框架（Planner→检索→反思→合成）")
-    p.add_argument("--task", type=str, default="", help="研究任务；省略则运行内置演示问题")
+    p.add_argument("--task", type=str, default="AI Infra对于大模型应用、算法做了哪些方面的支撑？需要学哪些方面的知识，怎么去入门？", help="研究任务；省略则运行内置演示问题")
     p.add_argument(
         "--no-file-log",
         action="store_true",

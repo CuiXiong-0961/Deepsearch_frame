@@ -21,4 +21,8 @@ LOCAL_BASE_URL = os.getenv("LOCAL_BASE_URL")
 
 TAVILY_API_KEY = os.getenv("TAVILY_API_KEY")
 
+# 本地 query-aware 压缩（utils/query_compress）；示例：Qwen/Qwen2.5-1.5B-Instruct 或 Qwen/Qwen3.5-4B
+COMPRESS_MODEL_ID = os.getenv("COMPRESS_MODEL_ID", "Qwen/Qwen2.5-1.5B-Instruct")
+ENABLE_QUERY_COMPRESS = os.getenv("ENABLE_QUERY_COMPRESS", "true").lower() in ("1", "true", "yes")
+
 # print(XIAOAI_API_KEY)

@@ -18,6 +18,7 @@ from schemas.models import Document, Plan, SubTask
 from synthesizer.synthesizer import Synthesizer
 from tools.page_reader import PageEnrichConfig
 from tools.web_search import web_search
+from utils.query_compress import prepare_documents_for_analysis
 
 logger = logging.getLogger(__name__)
 
@@ -143,6 +144,8 @@ def run_deep_research(
                 )
                 logger.info("search audit: %s", audit)
                 all_docs = _dedupe_docs(all_docs + new_docs)
+                # 超过 10 条时按查询相关性保留 Top10；单条正文超阈值则 query-aware 压缩（见 utils/query_compress）
+                all_docs = prepare_documents_for_analysis(query, all_docs, top_k=10)
                 if step_logger:
                     step_logger.log_step(
                         f"02_search[{st.id}]#{round_idx}",
