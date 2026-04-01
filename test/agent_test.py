@@ -1,7 +1,7 @@
 """
 Deepsearch_frame 入口：从项目根目录运行
-    python main.py
-    python main.py --task "你的研究问题"
+    python view/gradio_app.py
+    python test/agent_test.py --task "你的研究问题"
 """
 
 from __future__ import annotations
