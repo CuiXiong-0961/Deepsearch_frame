@@ -5,6 +5,20 @@
 logger/records/*.txt
 logger/records/*.md
 
+# 运行生成：LangGraph 子任务分文件日志（按 run_id 子目录）
+logger/subtasks/
+
+# 运行生成：Gradio 好/坏评分等反馈 JSON
+logger/feedback/
+
+# 运行生成：Ragas 评估数据集与结果（third_party/rag_eval/evals.py）
+third_party/rag_eval/evals/datasets/
+third_party/rag_eval/evals/records/
+third_party/rag_eval/evals/results/
+
+# 运行生成：Ragas 默认 experiments 输出目录（在项目根目录执行时）
+experiments/
+
 .idea/
 
 __pycache__/

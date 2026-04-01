@@ -11,6 +11,7 @@ import logging
 import sys
 
 from orchestrator.runner import run_deep_research, run_deep_research_demo
+from orchestrator.langgraph_runner import run_deep_research_graph
 
 
 def _configure_logging(verbose: bool) -> None:
@@ -23,6 +24,19 @@ def _configure_logging(verbose: bool) -> None:
 def main() -> None:
     p = argparse.ArgumentParser(description="Deep Research 框架（Planner→检索→反思→合成）")
     p.add_argument("--task", type=str, default="AI Infra对于大模型应用、算法做了哪些方面的支撑？需要学哪些方面的知识，怎么去入门？", help="研究任务；省略则运行内置演示问题")
+    p.add_argument(
+        "--engine",
+        type=str,
+        default="graph",
+        choices=["graph", "serial"],
+        help="编排引擎：graph=LangGraph 并行；serial=原串行（默认 graph）",
+    )
+    p.add_argument(
+        "--parallel",
+        type=int,
+        default=3,
+        help="子任务并行度上限（仅 engine=graph 生效，默认 3）",
+    )
     p.add_argument(
         "--no-file-log",
         action="store_true",
@@ -41,13 +55,38 @@ def main() -> None:
         fl = not args.no_file_log
         fetch_page = not args.no_fetch_page
         if args.task.strip():
-            text = run_deep_research(
-                args.task.strip(),
-                file_log=fl,
-                fetch_full_page=fetch_page,
-            )
+            if args.engine == "serial":
+                text = run_deep_research(
+                    args.task.strip(),
+                    file_log=fl,
+                    fetch_full_page=fetch_page,
+                )
+            else:
+                # 方法注释：graph runner 是 async，CLI 用 asyncio.run 启动
+                import asyncio
+
+                text = asyncio.run(
+                    run_deep_research_graph(
+                        args.task.strip(),
+                        file_log=fl,
+                        fetch_full_page=fetch_page,
+                        parallel=max(1, int(args.parallel)),
+                    )
+                )
         else:
-            text = run_deep_research_demo(file_log=fl, fetch_full_page=fetch_page)
+            if args.engine == "serial":
+                text = run_deep_research_demo(file_log=fl, fetch_full_page=fetch_page)
+            else:
+                import asyncio
+
+                text = asyncio.run(
+                    run_deep_research_graph(
+                        "2024–2025 年主流大语言模型在中文场景下有哪些代表性进展？请分技术路线简述。",
+                        file_log=fl,
+                        fetch_full_page=fetch_page,
+                        parallel=max(1, int(args.parallel)),
+                    )
+                )
         print()
         print("=" * 60)
         print(text)

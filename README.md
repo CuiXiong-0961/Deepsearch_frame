@@ -94,9 +94,9 @@ pip install -r requirements.txt
 **运行**：
 
 ```bash
-python main.py --task "你的研究问题"
-# python main.py --no-fetch-page      # 不拉网页正文（更快）
-# python main.py --no-file-log        # 不写步骤 txt
+python agrnt_test.py --task "你的研究问题"
+# python agrnt_test.py --no-fetch-page      # 不拉网页正文（更快）
+# python agrnt_test.py --no-file-log        # 不写步骤 txt
 ```
 
 单次运行的**步骤记录**默认写入 `logger/records/`，文件名形如 `YYYY-MM-DD_HH-MM-SS.txt`（Windows 下文件名不含冒号）。

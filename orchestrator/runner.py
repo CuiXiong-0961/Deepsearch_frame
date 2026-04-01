@@ -19,6 +19,7 @@ from synthesizer.synthesizer import Synthesizer
 from tools.page_reader import PageEnrichConfig
 from tools.web_search import web_search
 from utils.query_compress import prepare_documents_for_analysis
+from utils.subtask_order import sort_subtasks_ordered
 
 logger = logging.getLogger(__name__)
 
@@ -26,10 +27,6 @@ logger = logging.getLogger(__name__)
 MAX_GLOBAL_SEARCHES = 30
 MAX_SEARCHES_PER_SUBTASK = 8
 MAX_EXTRA_RETRIEVAL_ROUNDS = 2  # 除首轮外最多补搜 2 次
-
-
-def _priority_rank(p: str) -> int:
-    return {"P0": 0, "P1": 1, "P2": 2}.get(p.strip().upper(), 1)
 
 
 def _dedupe_docs(docs: List[Document]) -> List[Document]:
@@ -52,7 +49,9 @@ def _pick_docs(refl_filtered: List[int], pool: List[Document]) -> List[Document]
 
 
 def _sort_subtasks(plan: Plan) -> List[SubTask]:
-    return sorted(plan.subtasks, key=lambda s: (_priority_rank(s.priority), s.id))
+    """与 ``utils.subtask_order`` 一致：s1/s2/… 按数字序，避免 P0 的 s6 排在 P1 的 s3 前。"""
+
+    return sort_subtasks_ordered(plan.subtasks)
 
 
 def _docs_snapshot(docs: List[Document], preview: int = 500) -> list[dict]:
