@@ -10,47 +10,36 @@
 
 | 维度 | 说明 |
 |------|------|
-| **流程编排** | Planner 子任务拆解 → 子任务循环内「检索 → Reflection → 可选补搜」→ Synthesizer 大纲 + 成文；全局与子任务级**检索预算**，避免无限循环。 |
-| **联网检索** | 统一 `Retriever` 抽象；**Tavily / DuckDuckGo** 可切换；搜索仅给摘要时信息不足 → **`tools/page_reader` 拉取 HTML 正文**（trafilatura）并可选 **OCR 补充图中文字**（非多模态语义，仅文字）。 |
-| **证据治理** | 合并结果 **>10 条** 时按查询做 **TF-IDF（字符 n-gram）相关性 Top-10**；单条正文 **>2000 字** 时可选 **query-aware 本地小模型压缩**（目标 ~500 字），失败则截断，主流程不崩。 |
-| **LLM 接入** | `utils/my_llm`：**厂商 + 模型枚举**懒加载、独立 **httpx** 超时/连接池、**max_retries**；支持通义 / DeepSeek 等 OpenAI 兼容端点。 |
-| **可观测** | `logger/records/` 按会话时间戳输出 **txt 步骤日志**（每步 INPUT/OUTPUT），便于复盘与调试。 |
+| **流程编排** | **LangGraph**（`orchestrator/langgraph_runner.py`）：plan → 按波次并行子任务 → 每波后 `Planner.update_plan` 调整后续子任务 → 汇总合成；**串行**见 `orchestrator/runner.py`。CLI：`--engine graph` 或 `serial`，`--parallel N`（默认 3）；全局/子任务级**检索预算**不变。 |
+| **状态与内存** | 检索文档、audit、reflection 等大对象写入 **Redis**（`utils/redis_store.py`），图状态只保留 **key**，避免 state 膨胀；`.env` 配置 `REDIS_HOST` / `REDIS_PORT` 等。 |
+| **子任务顺序** | `utils/subtask_order.py`：对 `s1`、`s2`… 按**数字序号**排序，保证列表与合并日志阅读顺序一致。 |
+| **联网检索** | 统一 `Retriever` 抽象；**Tavily / DuckDuckGo** 可切换；可选 **`tools/page_reader` 拉取 HTML 正文**与 **OCR** 补充图中文字。 |
+| **证据治理** | 合并结果 **>10 条** 时 **TF-IDF Top-10**；单条 **>2000 字** 时可选 **query-aware 本地小模型压缩**，失败则截断。 |
+| **LLM 接入** | `utils/my_llm`：厂商 + 模型枚举、独立 **httpx** 超时/连接池、**max_retries**；支持通义 / DeepSeek 等 OpenAI 兼容端点。 |
+| **可观测** | **子任务级**日志 `logger/subtasks/{run_id}/` + 运行结束按序**合并**到 `logger/records/`；控制台输出**本波并行 id**与 **plan 更新差异**（新增/删除/字段变更）。会话级 txt 仍见 `logger/records/`。 |
+| **交互与评估** | **Gradio**（`view/gradio_app.py`）：子任务列表、并行「当前任务」展示、输出后人工反馈；**Ragas** 评估示例见 `third_party/rag_eval/evals.py`（可选）。 |
 
 ---
 
-## 架构与数据流
+## 架构与数据流（Graph 模式概要）
 
 ```mermaid
-flowchart LR
-  subgraph input [输入]
-    T[用户任务]
-  end
-  subgraph plan [规划]
-    P[Planner]
-  end
-  subgraph loop [子任务循环]
-    R[Retriever + 网页正文/OCR]
-    Q[Top10 + 压缩]
-    F[Reflector]
-    S[子任务小结]
-  end
-  subgraph out [输出]
-    Y[Synthesizer 大纲与报告]
-  end
-  T --> P
-  P --> R
-  R --> Q
-  Q --> F
-  F --> S
-  S --> Y
+flowchart TB
+  T[用户任务] --> P[Planner.create_plan]
+  P --> W[按波次并行: 检索→Reflection→补搜→子任务小结]
+  W --> U{每波结束 update_plan}
+  U -->|仍有待办| W
+  U -->|完成| Y[Synthesizer 大纲与报告]
+  W -.-> R[(Redis: 文档/审计 key)]
 ```
 
-**设计思路（个人取舍）**
+**设计要点**
 
-1. **先结构化再检索**：复杂问题不直接「一问一搜」，而是先产出可执行的子问题列表（带优先级），便于 Reflection 按子任务判断证据是否充分。  
-2. **搜索 API 与页面正文解耦**：API 返回的 snippet 延迟低但信息密度差；正文抓取与 OCR 作为**可选增强**，并用超时与条数上限控制成本。  
-3. **证据层先压缩再进大模型**：反思与合成阶段不假设「无限上下文」——相关性裁剪 + 超长文本压缩/截断，减少噪声与费用。  
-4. **工业级 HTTP 与可降级**：LLM 与网页请求均带超时与重试语义；本地压缩模型、Tesseract、sklearn 等**缺失或失败时自动降级**，保证整条链路可跑通。
+1. **先结构化再检索**：Planner 产出带优先级的子问题；Reflection 按子任务判断证据是否充分。  
+2. **波次并行 + 动态规划**：每波最多并行 `N` 个子任务；波次结束后用已完成摘要触发 **plan 更新**，后续子任务可增删改。  
+3. **搜索与正文解耦**：snippet 快但信息密度差；正文与 OCR 为可选增强，带超时与条数上限。  
+4. **证据先裁剪再进大模型**：相关性 Top-K + 超长压缩/截断，降低噪声与费用。  
+5. **Redis 外置大对象**：避免 LangGraph state 序列化过大；会话结束或 UI 下一问时可清理（见应用逻辑）。
 
 ---
 
@@ -58,17 +47,19 @@ flowchart LR
 
 ```
 Deepsearch_frame/
-├── orchestrator/       # 主循环与状态衔接
-├── planner/            # 任务 → Plan（JSON 结构化输出）
-├── retrievers/         # WebRetriever；向量/混合检索接口预留
+├── orchestrator/       # runner.py 串行主循环；langgraph_runner.py LangGraph + 波次并行
+├── planner/            # 任务 → Plan；支持 update_plan 反馈更新
+├── retrievers/         # WebRetriever（Tavily / DDG）
 ├── reflection/         # 证据充分性 + 补搜建议
 ├── synthesizer/        # 子任务摘要 → 大纲 → 报告
 ├── memory/             # MemoryHub 中间状态
-├── tools/              # web_search、page_reader（正文 + OCR）
-├── utils/              # LLM 工厂、doc 排序、query 压缩、json 解析、env
-├── logger/             # SessionStepLogger + records/*.txt
-├── schemas/            # Pydantic 共享模型
-├── main.py             # CLI 入口
+├── tools/              # web_search、page_reader
+├── utils/              # LLM、Redis、子任务排序、doc 排序、query 压缩、env
+├── logger/             # SessionStepLogger；records/ 合并日志；subtasks/ 子任务日志；feedback/ UI 反馈（运行生成，见 .gitignore）
+├── view/               # Gradio 可视化入口
+├── third_party/rag_eval/  # Ragas 评估示例（可选）
+├── schemas/            # Pydantic 模型
+├── test/agent_test.py  # CLI 入口（graph/serial、parallel）
 └── requirements.txt
 ```
 
@@ -84,40 +75,55 @@ cd Deepsearch_frame
 pip install -r requirements.txt
 ```
 
-**配置**：复制环境变量模板（勿将真实 Key 提交到 Git）：
+**配置**（勿将真实 Key 提交到 Git）：
 
-- 通义 / DeepSeek 等：`BAILIAN_*` 或 `DEEPSEEK_*`（见 `utils/env_utils.py`）  
-- 联网搜索：可选 `TAVILY_API_KEY`；未配置时走 DuckDuckGo  
-- 本地压缩模型：可选 `COMPRESS_MODEL_ID`、`ENABLE_QUERY_COMPRESS`  
-- OCR：需本机安装 [Tesseract](https://github.com/tesseract-ocr/tesseract)（中文需语言包）
+- LLM：通义 / DeepSeek 等（`BAILIAN_*`、`DEEPSEEK_*`，见 `utils/env_utils.py`）  
+- 联网：`TAVILY_API_KEY`（可选；未配置可走 DuckDuckGo）  
+- **Redis**（Graph 模式推荐）：`REDIS_URL`（如 `redis://localhost:6379/0`），或 `REDIS_HOST` / `REDIS_PORT` / `REDIS_DB` / `REDIS_PREFIX`  
+- 本地压缩：`COMPRESS_MODEL_ID`、`ENABLE_QUERY_COMPRESS`  
+- OCR：本机安装 [Tesseract](https://github.com/tesseract-ocr/tesseract)
 
-**运行**：
+**CLI 运行**（从项目根目录）：
 
 ```bash
-python agrnt_test.py --task "你的研究问题"
-# python agrnt_test.py --no-fetch-page      # 不拉网页正文（更快）
-# python agrnt_test.py --no-file-log        # 不写步骤 txt
+python test/agent_test.py --task "你的研究问题"
+# python test/agent_test.py --engine graph --parallel 3   # 默认 graph + 并行度 3
+# python test/agent_test.py --engine serial               # 仅串行 orchestrator/runner.py
+# python test/agent_test.py --no-fetch-page --no-file-log
 ```
 
-单次运行的**步骤记录**默认写入 `logger/records/`，文件名形如 `YYYY-MM-DD_HH-MM-SS.txt`（Windows 下文件名不含冒号）。
+若本地另有根目录 `main.py` 入口，参数与上表一致。
+
+**Gradio**：
+
+```bash
+python view/gradio_app.py
+```
+
+日志：合并报告与步骤见 `logger/records/`；子任务分文件见 `logger/subtasks/`。
+
+**可选：Ragas 评估**（无标准答案时的检索质量指标示例）：在项目根目录配置环境变量后运行 `python third_party/rag_eval/evals.py`。常用变量：`EVAL_LOG_PATH`（步骤日志文件或目录）、`EVAL_TASK`、`EVAL_FETCH_FULL_PAGE`；评审 LLM 等与 Ragas 要求一致，详见脚本内注释。
 
 ---
 
 ## 技术栈
 
-- **编排与模型**：LangChain ChatOpenAI（OpenAI 兼容 API）、Pydantic  
+- **编排**：LangGraph（`langgraph==1.0.3`）、LangChain ChatOpenAI、Pydantic  
+- **缓存**：Redis（`redis` 客户端）  
 - **检索与网页**：httpx、trafilatura、BeautifulSoup、可选 Tavily / DDG  
-- **相关性**：scikit-learn（字符 TF-IDF + 余弦相似度）  
-- **可选压缩**：Hugging Face `transformers` + PyTorch 本地小模型  
+- **相关性**：scikit-learn（字符 TF-IDF）  
+- **可选压缩**：Hugging Face `transformers` + PyTorch  
 - **可选 OCR**：pytesseract + Pillow  
+- **UI**：Gradio 5.50  
+- **评估（可选）**：Ragas（vendored 或依赖安装）
 
 ---
 
 ## 局限与可扩展方向
 
-- **Planner / Reflection** 依赖 LLM 输出 JSON，已做解析容错，极端情况下需调 prompt。  
-- **Vector / Hybrid / Text2SQL** 在 `retrievers` 中为接口占位，可按业务接入。  
-- **LangGraph**：当前为显式主循环实现，便于阅读；若需复杂分支与可视化，可迁移为图编排而不改模块边界。  
+- Planner / Reflection / update_plan 依赖 LLM 与 JSON 解析，已做容错，极端情况需调 prompt。  
+- Vector / Hybrid 等在 `retrievers` 中可扩展。  
+- Ragas 评估脚本需单独配置评审 LLM 与数据集路径。
 
 ---
 
